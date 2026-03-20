@@ -170,6 +170,44 @@
     margin-bottom: 16px;
   }
 
+  .card-player {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .play-btn {
+    appearance: none;
+    border: 1px solid #29406d;
+    background: rgba(18, 31, 59, 0.85);
+    color: #d9e5ff;
+    border-radius: 999px;
+    padding: 7px 11px;
+    font: inherit;
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .play-btn:hover {
+    background: rgba(27, 46, 86, 0.96);
+    border-color: #3b5b95;
+  }
+
+  .play-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .play-status {
+    color: #91a4ca;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
   .card-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -265,6 +303,10 @@
   <div class="card-year" id="c-year"></div>
   <div class="card-title" id="c-title"></div>
   <div class="card-meta" id="c-meta"></div>
+  <div class="card-player">
+    <button class="play-btn" id="c-play-btn" type="button">Play Preview</button>
+    <div class="play-status" id="c-play-status">Click a wave to hear a 30s preview.</div>
+  </div>
   <div class="card-stats">
     <div><div class="stat-val" id="c-bpm"></div><div class="stat-label">BPM</div></div>
     <div><div class="stat-val" id="c-energy"></div><div class="stat-label">Energy</div></div>
@@ -440,6 +482,28 @@ view.onMouseLeave = function() {
   hideCard();
 };
 
+view.onClick = function(event) {
+  var my = event.point.y;
+  var closest = -1;
+  var minDist = slotH * 1.2;
+
+  for (var i = 0; i < n; i++) {
+    var dist = Math.abs(my - baseYForIndex(i));
+    if (dist < minDist) {
+      minDist = dist;
+      closest = i;
+    }
+  }
+
+  if (closest >= 0) {
+    hoveredIdx = closest;
+    showCard(songs[closest]);
+    if (typeof window.toggleSongPreview === "function") {
+      window.toggleSongPreview(songs[closest]);
+    }
+  }
+};
+
 view.onResize = function() {
   syncMetrics();
 };
@@ -474,6 +538,7 @@ view.on("touchend", function() {
 
 function showCard(s) {
   var card = document.getElementById("card");
+  window.currentCardSong = s;
   document.getElementById("c-year").textContent = s.year;
   document.getElementById("c-title").textContent = s.title;
   document.getElementById("c-meta").textContent = formatViews(s.views) + " YouTube views";
@@ -504,6 +569,9 @@ function showCard(s) {
   }
 
   card.style.display = "block";
+  if (typeof window.refreshPlaybackState === "function") {
+    window.refreshPlaybackState();
+  }
 }
 
 function hideCard() {
@@ -523,6 +591,90 @@ view.viewSize = new Size(window.innerWidth, window.innerHeight);
 
 <script>
   document.getElementById("subtitle").textContent = (window.ARIJIT_SONGS || []).length + " songs · stacked by BPM · hover to explore";
+
+  document.getElementById("subtitle").textContent = (window.ARIJIT_SONGS || []).length + " songs · stacked by BPM · click to play previews";
+
+  var previewAudio = new Audio();
+  previewAudio.preload = "none";
+  window.currentCardSong = null;
+  window.currentPreviewSong = null;
+
+  function songKey(song) {
+    return song ? song.title + "::" + song.year : "";
+  }
+
+  window.refreshPlaybackState = function() {
+    var button = document.getElementById("c-play-btn");
+    var status = document.getElementById("c-play-status");
+    var song = window.currentCardSong;
+
+    if (!song) {
+      button.disabled = true;
+      button.textContent = "Play Preview";
+      status.textContent = "Click a wave to hear a 30s preview.";
+      return;
+    }
+
+    var hasPreview = !!song.previewUrl;
+    var isCurrent = songKey(song) === songKey(window.currentPreviewSong);
+    var isPlaying = isCurrent && !previewAudio.paused;
+
+    button.disabled = !hasPreview;
+    button.textContent = isPlaying ? "Pause Preview" : "Play Preview";
+
+    if (!hasPreview) {
+      status.textContent = "No preview is available for this track.";
+    } else if (isPlaying) {
+      status.textContent = "Now playing 30s preview.";
+    } else if (isCurrent && previewAudio.currentTime > 0) {
+      status.textContent = "Preview paused.";
+    } else {
+      status.textContent = "Click the wave or button to hear a 30s preview.";
+    }
+  };
+
+  window.toggleSongPreview = function(song) {
+    if (!song || !song.previewUrl) {
+      previewAudio.pause();
+      window.currentPreviewSong = null;
+      window.refreshPlaybackState();
+      return;
+    }
+
+    var sameSong = songKey(song) === songKey(window.currentPreviewSong);
+    if (sameSong && !previewAudio.paused) {
+      previewAudio.pause();
+      window.refreshPlaybackState();
+      return;
+    }
+
+    if (!sameSong) {
+      previewAudio.src = song.previewUrl;
+      window.currentPreviewSong = song;
+    }
+
+    previewAudio.play().then(function() {
+      window.refreshPlaybackState();
+    }).catch(function() {
+      window.refreshPlaybackState();
+    });
+  };
+
+  previewAudio.addEventListener("ended", function() {
+    window.refreshPlaybackState();
+  });
+
+  previewAudio.addEventListener("pause", function() {
+    window.refreshPlaybackState();
+  });
+
+  previewAudio.addEventListener("play", function() {
+    window.refreshPlaybackState();
+  });
+
+  document.getElementById("c-play-btn").addEventListener("click", function() {
+    window.toggleSongPreview(window.currentCardSong);
+  });
 
   function syncCanvasSize() {
     var canvas = document.getElementById("cv");
@@ -562,6 +714,7 @@ view.viewSize = new Size(window.innerWidth, window.innerHeight);
   window._activeFilter = "all";
   window.paperActiveFilter = "all";
   applyLegendState("all");
+  window.refreshPlaybackState();
 </script>
 </body>
 </html>
